@@ -1,1 +1,0 @@
-sensorbio_mcp_server

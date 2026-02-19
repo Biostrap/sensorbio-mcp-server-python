@@ -1,2 +1,0 @@
-[console_scripts]
-sensorbio-mcp-server = sensorbio_mcp_server.server:main
