@@ -16,9 +16,10 @@ def _sensr() -> SensrClient:
 
 @mcp.tool()
 def list_users(page: int = 1, limit: int = 100, search: str | None = None) -> dict[str, Any]:
-    params: dict[str, Any] = {"page": page, "limit": limit}
+    # Sensr expects items_per_page and q
+    params: dict[str, Any] = {"page": page, "items_per_page": limit}
     if search:
-        params["search"] = search
+        params["q"] = search
     return _sensr().request("GET", "/v1/organizations/users", params=params)
 
 
@@ -29,40 +30,42 @@ def get_user_ids() -> dict[str, Any]:
 
 @mcp.tool()
 def get_sleep(user_id: str, date: str | None = None) -> dict[str, Any]:
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"user_id": user_id}
     if date:
         params["date"] = date
-    return _sensr().request("GET", f"/v1/users/{user_id}/sleep", params=params)
+    return _sensr().request("GET", "/v1/sleep", params=params)
 
 
 @mcp.tool()
 def get_scores(user_id: str, date: str | None = None) -> dict[str, Any]:
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"user_id": user_id}
     if date:
         params["date"] = date
-    return _sensr().request("GET", f"/v1/users/{user_id}/scores", params=params)
+    return _sensr().request("GET", "/v1/scores", params=params)
 
 
 @mcp.tool()
 def get_activities(user_id: str, last_timestamp: int = 0, limit: int = 50) -> dict[str, Any]:
-    params: dict[str, Any] = {"last_timestamp": last_timestamp, "limit": limit}
-    return _sensr().request("GET", f"/v1/users/{user_id}/activities", params=params)
+    # Sensr activities is query-param style
+    params: dict[str, Any] = {"user_id": user_id, "last-timestamp": last_timestamp, "limit": limit}
+    return _sensr().request("GET", "/v1/activities", params=params)
 
 
 @mcp.tool()
 def get_biometrics(user_id: str, last_timestamp: int = 0, limit: int = 50) -> dict[str, Any]:
-    params: dict[str, Any] = {"last_timestamp": last_timestamp, "limit": limit}
-    return _sensr().request("GET", f"/v1/users/{user_id}/biometrics", params=params)
+    # Sensr biometrics is query-param style
+    params: dict[str, Any] = {"user_id": user_id, "last-timestamp": last_timestamp, "limit": limit}
+    return _sensr().request("GET", "/v1/biometrics", params=params)
 
 
 @mcp.tool()
 def get_calories(user_id: str, date: str | None = None, granularity: str | None = None) -> dict[str, Any]:
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"user_id": user_id}
     if date:
         params["date"] = date
     if granularity:
         params["granularity"] = granularity
-    return _sensr().request("GET", f"/v1/users/{user_id}/calories", params=params)
+    return _sensr().request("GET", "/v1/calorie/details", params=params)
 
 
 @mcp.tool()
