@@ -6,15 +6,45 @@ import random
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
+import threading
 
 import httpx
 
 
 DEFAULT_BASE_URL = "https://api.getsensr.io"
 
+# Process-wide throttle state (per python process, shared across client instances).
+_THROTTLE_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
+
 
 class SensrError(RuntimeError):
-    pass
+    """Internal exception; tools should return standardized error dicts instead of raising."""
+
+
+def error_dict(
+    *,
+    message: str,
+    endpoint: str,
+    method: str,
+    status: int | None = None,
+    headers: httpx.Headers | None = None,
+    body_preview: str | None = None,
+) -> dict[str, Any]:
+    hdrs = _pick_headers_subset(headers) if headers is not None else None
+    preview = body_preview
+    if preview is not None and len(preview) > 1500:
+        preview = preview[:1500] + "..."
+    return {
+        "error": {
+            "message": message,
+            "endpoint": endpoint,
+            "method": method,
+            "status": status,
+            "headers_subset": hdrs,
+            "body_preview": preview,
+        }
+    }
 
 
 def _pick_headers_subset(headers: httpx.Headers) -> dict[str, str]:
@@ -42,6 +72,9 @@ class SensrClient:
     base_url: str = DEFAULT_BASE_URL
     timeout_s: float = 30.0
     max_retries: int = 4
+    # Global client-side throttling to avoid WAF/rate-limits.
+    # Ensures at least this many seconds between requests per-process.
+    min_interval_s: float = 0.4
 
     @classmethod
     def from_env(cls) -> "SensrClient":
@@ -61,6 +94,17 @@ class SensrClient:
             http2=True,
         )
 
+    def _throttle(self) -> None:
+        global _LAST_REQUEST_AT
+        if self.min_interval_s <= 0:
+            return
+        with _THROTTLE_LOCK:
+            now = time.time()
+            wait_s = (_LAST_REQUEST_AT + self.min_interval_s) - now
+            if wait_s > 0:
+                time.sleep(wait_s)
+            _LAST_REQUEST_AT = time.time()
+
     def request(
         self,
         method: str,
@@ -71,14 +115,30 @@ class SensrClient:
         """Makes an API request and returns parsed JSON.
 
         Retries transient errors (429/5xx/timeouts) with exponential backoff + jitter.
+
+        NOTE: Tool functions should *not* let exceptions escape; catch SensrError/Exception
+        and return `error_dict(...)`.
         """
         last_exc: Exception | None = None
         with self._client() as client:
             for attempt in range(self.max_retries + 1):
                 try:
+                    self._throttle()
                     resp = client.request(method, path, params=params)
 
-                    if resp.status_code in (429, 500, 502, 503, 504):
+                    if resp.status_code == 429:
+                        # Respect Retry-After if present.
+                        ra = resp.headers.get("retry-after")
+                        if ra:
+                            try:
+                                time.sleep(float(ra))
+                            except ValueError:
+                                pass
+                        raise SensrError(
+                            f"Transient HTTP 429 for {method} {path}: {resp.text[:500]}"
+                        )
+
+                    if resp.status_code in (500, 502, 503, 504):
                         raise SensrError(
                             f"Transient HTTP {resp.status_code} for {method} {path}: {resp.text[:500]}"
                         )
